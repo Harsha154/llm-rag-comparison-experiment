@@ -1,0 +1,21 @@
+# RAG Pipeline Requirements
+# ========================
+
+# Core dependencies
+openai>=1.0.0
+chromadb>=0.4.0
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Configuration and utilities
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Performance and parallelization
+tqdm>=4.65.0     # Progress bars
+aiohttp>=3.8.0   # Async HTTP client
+asyncio          # Built-in async support
+
+# Optional: For enhanced functionality
+tiktoken>=0.5.0  # For token counting
+rich>=13.0.0     # For better console output
