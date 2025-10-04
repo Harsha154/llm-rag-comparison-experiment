@@ -69,7 +69,8 @@ class InsuranceLLMExperiment:
     def _get_character_prompt(self, character: str) -> str:
         """Get the character-specific prompt section."""
         if character == 'Chad':
-            return """1. If your decision-maker profile is Chad, your risk aversion is 0. You are highly risk-tolerant and may favor high deductibles even at the expense of quality. For each probe in the scenario, the recommended preferences are:
+            return """1. The decision-maker profile assigned to you is Chad, and your risk aversion level is 0. You are highly risk-tolerant and will favor high deductibles even at the expense of quality. For each probe in the scenario, the recommended preferences are:
+
 SPECIALIST: Accepts referral requirements and network restrictions for lower costs
 URGENT CARE: Uses whatever's cheapest available, unconcerned about provider quality variance
 PHARMACY: Chooses highest copays (doesn't think he'll get sick), switches to generics readily
@@ -78,10 +79,11 @@ OOP MAXIMUM: Accepts highest maximum, betting on staying healthy
 TELEMEDICINE: First choice for everything possible to minimize costs
 PCP: Skips preventive care if copays apply
 OUTPATIENT SURGERY: Chooses lowest-cost facilities/surgeons
-Choice influence: LOW - Primarily cost-driven decisions"""
+Choice influence: LOW - Primarily cost-driven decisions
+"""
         
         elif character == 'Brie':
-            return """2. If your decision-maker profile is Brie, your risk aversion is 0.5. You are moderately risk-tolerant and aim to balance cost and quality. For each probe in the scenario, the recommended preferences are:
+            return """2. The decision-maker profile assigned to you is Brie, and your risk aversion level is 0.5. You are moderately risk-tolerant and aim to balance cost and quality. For each probe in the scenario, the recommended preferences are:
 SPECIALIST: Weighs referral hassle against direct access costs
 URGENT CARE: Balances quality concerns with convenience needs
 PHARMACY: Moderate copays, some brand preference flexibility
@@ -93,7 +95,8 @@ OUTPATIENT SURGERY: Researches options, balances quality and cost
 Choice influence: MODERATE - Actively weighing multiple factors"""
         
         elif character == 'Alex':
-            return """3. If your decision-maker profile is Alex, your risk aversion is 1. You are highly risk-averse and prioritize predictability and control over cost. For each probe in the scenario, the recommended preferences are:
+            return """3. The decision-maker profile assigned to you is Alex, and your risk aversion level is 1. You are highly risk-averse and prioritize predictability and control over cost. For each probe in the scenario, the recommended preferences are:
+
 SPECIALIST: Pays for open access to choose best specialists
 URGENT CARE: Prefers known emergency departments despite higher costs
 PHARMACY: Lowest copays, maintains brand medications
@@ -102,7 +105,8 @@ OOP MAXIMUM: Lowest maximum for complete financial protection
 TELEMEDICINE: Supplements but doesn't replace in-person care
 PCP: Prioritizes continuity with trusted physician
 OUTPATIENT SURGERY: Selects top surgeons/facilities regardless of cost
-Choice influence: HIGH - Demands maximum control over healthcare decisions"""
+Choice influence: HIGH - Demands maximum control over healthcare decisions
+"""
         
         return ""
     
@@ -114,28 +118,44 @@ Choice influence: HIGH - Demands maximum control over healthcare decisions"""
         
         # Combine both prompts
         prompt = f"""You are given data about a person who is designated the primary insured and their family, along with details of a medical insurance plan. Each record contains the following features:
+
 probe: The type of insurance plan or coverage item (e.g., OUT-OF-POCKET MAXIMUM, deductible, coinsurance).
+
 network_status: Type of insurance network for the service (e.g., IN-NETWORK, OUT-OF-NETWORK, generic).
+
 expense_type: The type of cost associated with the plan, expressed in dollars or percentage (e.g., COST IN $, copay in $, PERCENT PLAN PAYS).
+
 children_under_4: Number of children in the family under age 4.
+
 children_under_12: Number of children in the family under age 12.
+
 children_under_18: Number of children in the family under age 18.
+
 children_under_26: Number of children in the family under age 26.
+
 employee_type: The payment structure of the primary insured's employment compensation (e.g., salaried, hourly, bonus). Note: salaried employees may have more stable income and benefits.
+
 distance_dm_home_to_employer_hq: Distance from home to primary insured's employer headquarters.
-travel_location_known: Whether the person's work/travel location is known (Yes/No).
+
+travel_location_known: Whether the person’s work/travel location is known (Yes/No).
+
 owns_rents: Housing status of the person (Owns or Rents).
+
 no_of_medical_visits_previous_year: Number of medical visits the person had in the past year.
+
 percent_family_members_with_chronic_condition: Percentage of family members with chronic medical conditions.
+
 percent_family_members_that_play_sports: Percentage of family members who actively participate in sports.
 
-Scenario: {scenario_data}
-You are comparing health insurance plans. Plans differ in upfront costs (premiums) and usage costs (deductibles, copays, coinsurance, out-of-pocket maximums, etc.) 
-You do not know the total cost of premiums, but you may assume that plans with higher out-of-pocket costs are associated with lower premiums, and plans with lower out-of-pocket costs generally have higher premiums. 
+Task:
+Based on these features, you are comparing health insurance plans. Plans differ in upfront costs (premiums) and usage costs (deductibles, copays, coinsurance, out-of-pocket maximums, etc.) You do not know the total cost of premiums, but you may assume that plans with higher out-of-pocket costs are associated with lower premiums, and plans with lower out-of-pocket costs generally have higher premiums. 
 When the plan covers a higher percentage of costs, the premium may be higher. 
 Each probe presents different types of insurance plan options. Some probes may have absolute costs (e.g., copays, deductibles, out-of-pocket maximums), while others may be framed as percentage values (e.g., coinsurance, percent of costs covered by the plan). You must weigh these differently based on their cost sensitivity, risk aversion, and value placed on predictability versus flexibility.
-There are three decision-maker profiles based on risk aversion levels and your choice must align to the decision-maker profile that will be provided to you.
-Note: Risk aversion correlates with an implicit attribute called 'choice,' which is not directly measured. Low risk aversion corresponds to low choice influence, while high risk aversion corresponds to high choice influence. The maximum level occurs when both risk aversion and choice influence are high.
+There are three decision-maker targets with risk aversion levels of 0 (high risk tolerant), 0.5 (moderate risk aversion), and 1 (high risk averse), and your choice must align with the target decision maker's risk aversion level that will be provided to you.
+Note: Risk aversion correlates with an implicit attribute called ‘choice,’ which is not directly measured. Low risk aversion corresponds to low choice influence, while high risk aversion corresponds to high choice influence. The maximum level occurs when both risk aversion and choice influence are high.
+Your task is to select the insurance plan that aligns the most with the target decision-maker profile assigned to you. Consider how family composition, employment type, health history, and insurance plan characteristics might influence the decision.
+
+Scenario: {scenario_data}
 
 Risk Aversion Profiles:
 {character_prompt}
