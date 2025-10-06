@@ -5,11 +5,14 @@ import random
 from collections import Counter
 import argparse
 import json
+import asyncio
+import concurrent.futures
+from functools import partial
 
 class SelfConsistencyExperiment:
     """Self-consistency experiment that prints prompts for Alex, Chad, and Brie."""
     
-    def __init__(self, model: str = "gpt-5", temperature: float = 0.7):
+    def __init__(self, model: str = "gpt-4", temperature: float = 0.7):
         """
         Initialize the self-consistency experiment.
         
@@ -120,6 +123,74 @@ class SelfConsistencyExperiment:
             'n_assignments': n_assignment
         }
 
+    def run_self_consistency_for_row_parallel(self, row: pd.Series, target_character: str, max_workers: int = 5) -> Dict[str, Any]:
+        """
+        Run self-consistency sampling for a single scenario row with parallel API calls.
+        - Target gets N=5 samples (weight=+1)
+        - Two non-targets get randomized N in {2,3} (weight=-1)
+        Returns per-character samples and weighted vote tallies.
+        """
+        # Prepare scenario and choices
+        scenario_data = self.experiment._format_scenario_data(row)
+        choices = [row['val1'], row['val2'], row['val3'], row['val4']]
+
+        # Determine Ns and prompts by character
+        run_plan, n_assignment = self.get_run_jsons(target_character=target_character, scenario_data=scenario_data, choices=choices)
+
+        # Create all API call tasks
+        all_tasks = []
+        for character, plan in run_plan.items():
+            N = plan['N']
+            for _ in range(N):
+                all_tasks.append((character, row))
+
+        # Execute all API calls in parallel
+        per_character_samples: Dict[str, List[str]] = {}
+        weighted_votes: Dict[str, int] = {}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_character = {
+                executor.submit(self.experiment.run_single_scenario_character, row, character): character 
+                for character, row in all_tasks
+            }
+
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_character):
+                character = future_to_character[future]
+                try:
+                    result = future.result()
+                    extracted = result.get('llm_choice') or result.get('extracted_choice')
+                    if extracted is not None:
+                        if character not in per_character_samples:
+                            per_character_samples[character] = []
+                        per_character_samples[character].append(str(extracted))
+                        
+                        weight = 1 if character == target_character else -1
+                        weighted_votes[str(extracted)] = weighted_votes.get(str(extracted), 0) + weight
+                except Exception as e:
+                    print(f"❌ Error in parallel API call for {character}: {e}")
+
+        # Majority and weighted winners (optional summaries)
+        majority_winner: Optional[str] = None
+        all_positive_samples = per_character_samples.get(target_character, [])
+        if all_positive_samples:
+            majority_winner = Counter(all_positive_samples).most_common(1)[0][0]
+
+        weighted_winner: Optional[str] = None
+        if weighted_votes:
+            weighted_winner = sorted(weighted_votes.items(), key=lambda kv: kv[1], reverse=True)[0][0]
+
+        return {
+            'probe_id': row.get('id', None),
+            'target_character': target_character,
+            'per_character_samples': per_character_samples,
+            'majority_winner_positive': majority_winner,
+            'weighted_votes': weighted_votes,
+            'weighted_winner': weighted_winner,
+            'n_assignments': n_assignment
+        }
+
     def run_self_consistency_dataset(self, csv_path: str, target_column: str = 'target_character', max_scenarios: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Run self-consistency across a dataset. Each row must include `target_character` (or specify via target_column).
@@ -142,7 +213,7 @@ class SelfConsistencyExperiment:
 
         return results
 
-    def run_self_consistency_dataset_fixed_target(self, csv_path: str, target_character: str, max_scenarios: Optional[int] = None) -> List[Dict[str, Any]]:
+    def run_self_consistency_dataset_fixed_target(self, csv_path: str, target_character: str, max_scenarios: Optional[int] = None, use_parallel: bool = True, max_workers: int = 5) -> List[Dict[str, Any]]:
         """
         Run self-consistency across a dataset using a single fixed target character for all rows.
         Ignores any target column in the CSV.
@@ -155,8 +226,15 @@ class SelfConsistencyExperiment:
             df = df.head(max_scenarios)
 
         results: List[Dict[str, Any]] = []
-        for _, row in df.iterrows():
-            results.append(self.run_self_consistency_for_row(row, target_character))
+        
+        if use_parallel:
+            print(f"🚀 Running parallel self-consistency with {max_workers} workers...")
+            for _, row in df.iterrows():
+                results.append(self.run_self_consistency_for_row_parallel(row, target_character, max_workers))
+        else:
+            print("🚀 Running sequential self-consistency...")
+            for _, row in df.iterrows():
+                results.append(self.run_self_consistency_for_row(row, target_character))
 
         return results
 
@@ -165,7 +243,9 @@ class SelfConsistencyExperiment:
                      output_path: str = "self_consistency_results.csv",
                      target_column: str = 'target_character',
                      max_scenarios: Optional[int] = None,
-                     fixed_target_character: Optional[str] = None) -> Dict[str, Any]:
+                     fixed_target_character: Optional[str] = None,
+                     use_parallel: bool = True,
+                     max_workers: int = 5) -> Dict[str, Any]:
         """
         Run weighted self-consistency across a dataset and save results and summary.
         - Writes per-row results to CSV
@@ -177,6 +257,8 @@ class SelfConsistencyExperiment:
                 csv_path=csv_path,
                 target_character=fixed_target_character,
                 max_scenarios=max_scenarios,
+                use_parallel=use_parallel,
+                max_workers=max_workers,
             )
         else:
             results = self.run_self_consistency_dataset(
@@ -286,7 +368,9 @@ class SelfConsistencyExperiment:
                                    target_character: str,
                                    csv_path: str = "data/Test Probes.csv",
                                    output_path: str = "self_consistency_results.csv",
-                                   max_scenarios: Optional[int] = None) -> Dict[str, Any]:
+                                   max_scenarios: Optional[int] = None,
+                                   use_parallel: bool = True,
+                                   max_workers: int = 5) -> Dict[str, Any]:
         """
         Start the weighted self-consistency pipeline by passing a fixed target character.
         Saves CSV and JSON summary; returns the summary dict.
@@ -296,6 +380,8 @@ class SelfConsistencyExperiment:
             output_path=output_path,
             max_scenarios=max_scenarios,
             fixed_target_character=target_character,
+            use_parallel=use_parallel,
+            max_workers=max_workers,
         )
 
     def return_character_prompts(self, csv_path: str, scenario_index: int = 0):
@@ -347,7 +433,7 @@ def main():
     parser.add_argument("--output", type=str, default="self_consistency_results.csv", help="Path to output CSV")
     parser.add_argument("--target-column", type=str, default="target_character", help="Column containing target character per row")
     parser.add_argument("--max-scenarios", type=int, default=None, help="Optional limit on number of rows")
-    parser.add_argument("--model", type=str, default="gpt5", help="OpenAI model to use")
+    parser.add_argument("--model", type=str, default="gpt-4", help="OpenAI model to use")
     parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     parser.add_argument("--fixed-target-character", type=str, default=None, help="Use a fixed target character for all rows instead of reading from CSV")
     parser.add_argument("--print-prompts", action="store_true", help="Print character prompts for the first scenario and exit")

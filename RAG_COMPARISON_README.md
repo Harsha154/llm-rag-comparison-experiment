@@ -249,6 +249,156 @@ probe_10005_...,Chad,0,0,True,True
 }
 ```
 
+## 🔍 **How the RAG System Works**
+
+### **Step-by-Step RAG Process**
+
+#### **1. Setup**
+```bash
+# Set OpenAI API key
+export OPENAI_API_KEY="your-key"
+
+# Install dependencies
+cd rag_pipeline
+pip install -r requirements.txt
+```
+
+#### **2. Build the Vector Store (ChromaDB)**
+```bash
+# Ingest training data into ChromaDB
+python cli.py --ingest "../data/training-data-RAG.csv"
+
+# Verify ingestion
+python cli.py --info
+```
+
+**What happens during ingestion:**
+- Each CSV row from `training-data-RAG.csv` is converted to readable "scenario text"
+- Text is embedded using OpenAI's `text-embedding-3-small` model
+- Embeddings + metadata are stored in persistent ChromaDB collection
+
+#### **3. Run the Comparison Experiment**
+```bash
+# Basic experiment
+python llm_rag_comparison_experiment.py --input data/Test Probes.csv --output-dir ./results
+
+# Improved version with resume/backoff/chunking
+python llm_rag_comparison_experiment_improved.py --input data/Test Probes.csv --output-dir ./results --chunk-size 500 --rate-limit-delay 2
+```
+
+#### **4. Internal RAG Process (Per Scenario)**
+
+**Step 4a: Format the Scenario**
+- From `data/Test Probes.csv`, build structured description:
+  - Insurance Type, Network Status, Expense Type
+  - Family Composition (children counts by age)
+  - Employment/lifestyle (employee_type, distance, travel, housing)
+  - Health factors (visits, chronic conditions %, sports %)
+
+**Step 4b: Retrieve Similar Scenarios**
+- Embed the scenario text
+- Query ChromaDB for top-k nearest neighbors (default k=3)
+- Format results as:
+  ```
+  Similar Scenario 1:
+  Insurance Type: DEDUCTIBLE | Network Status: IN-NETWORK | Family Composition: 2 total children...
+  
+  Similar Scenario 2:
+  Insurance Type: DEDUCTIBLE | Network Status: OUT-OF-NETWORK | Family Composition: 1 total children...
+  
+  Similar Scenario 3:
+  Insurance Type: DEDUCTIBLE | Network Status: TIER 1 NETWORK | Family Composition: 3 total children...
+  ```
+
+**Step 4c: Build Final Prompt**
+- Include persona-specific risk-aversion guidance (Alex/Brie/Chad)
+- Append "Additional Context from Similar Insurance Scenarios" block
+- List options A–D with their values (`val1..val4`)
+- Instruct model to respond with chosen value (e.g., 1600, 600, 200, 0)
+
+**Step 4d: Call OpenAI and Extract Choice**
+- Send prompt to chat completion API
+- Extract choice from response:
+  - If A–D or "Option B" → map to letter
+  - Else extract first number token (e.g., 600)
+
+**Step 4e: Record Results**
+- Save with-RAG results to `results/rag_results.csv`
+- Save without-RAG results to `results/non_rag_results.csv`
+- Generate summary JSON with success rates
+
+### **Concrete Example**
+
+**Sample Scenario from Test Probes:**
+- `probe=DEDUCTIBLE`, `network_status=IN-NETWORK`, `expense_type=COST IN $`
+- Children: 1 under 4, 0 under 12/18/26
+- Employment: `Salaried`, 12 miles, Travel Known=Yes, Owns
+- Health: 3 visits, 10% chronic, 25% sports
+- Options: `val1=1600`, `val2=600`, `val3=200`, `val4=0`
+
+**RAG Retrieval Result:**
+- Similar scenarios show families with IN-NETWORK deductible choices leaning toward 600 or 200
+
+**Final Prompt to Brie (risk aversion 0.5):**
+```
+[Persona guidance for Brie...]
+
+Scenario: Insurance Type: DEDUCTIBLE
+Network Status: IN-NETWORK
+Expense Type: COST IN $
+Family Composition: 1 total children
+  - Under 4: 1
+  - Under 12: 0
+  - Under 18: 0
+  - Under 26: 0
+Employment Type: Salaried
+Distance to Employer HQ: 12 miles
+Travel Location Known: Yes
+Housing Status: Owns
+Medical Visits (Previous Year): 3
+Family Members with Chronic Conditions: 10%
+Family Members who Play Sports: 25%
+
+Additional Context from Similar Insurance Scenarios:
+Similar Scenario 1:
+Insurance Type: DEDUCTIBLE | Network Status: IN-NETWORK | Family Composition: 2 total children...
+
+Similar Scenario 2:
+Insurance Type: DEDUCTIBLE | Network Status: IN-NETWORK | Family Composition: 1 total children...
+
+Similar Scenario 3:
+Insurance Type: DEDUCTIBLE | Network Status: TIER 1 NETWORK | Family Composition: 3 total children...
+
+Your Task
+For the given probe, your risk aversion level is 0.5 and you have following available options:
+A. 1600
+B. 600
+C. 200
+D. 0
+
+As Brie with risk aversion = 0.5, choose the option that best aligns with your decision-maker's profile and risk aversion level.
+
+Respond with just the value of your chosen option (e.g., 1600, 600, 200, or 0).
+```
+
+**Model Response:** "600"
+**Extracted Choice:** 600
+**Result:** Saved with `use_rag=True`, `extracted_choice=600`, `success=True`
+
+### **Optimized Pipeline (for Large Datasets)**
+
+For processing 69,000+ rows efficiently:
+```bash
+# Use optimized ingester
+python cli_optimized.py --ingest "../data/training-data-RAG.csv"
+
+# Features:
+# - Batch embeddings (1000+ docs per API call)
+# - Parallel processing (10+ workers)
+# - Memory optimization
+# - Progress tracking
+```
+
 ## 🔍 **Interpreting Results**
 
 ### **Success Rate Comparison**

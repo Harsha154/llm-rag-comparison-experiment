@@ -25,7 +25,7 @@ load_dotenv()
 class InsuranceLLMExperiment:
     """Experiment class for running LLM insurance decision-making tests."""
     
-    def __init__(self, model: str = "gpt-4", temperature: float = 0.7):
+    def __init__(self, model: str = "gpt-5", temperature: float = 0.7):
         """
         Initialize the experiment.
         
@@ -268,17 +268,36 @@ Respond with just the value of your chosen option (e.g., 1600, 600, 200, or 0)."
             full_prompt = self._create_prompt(scenario_data, character, choices)
             
             # Get LLM response
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": f"You are {character}, an insurance decision-maker with specific risk preferences. Respond only with the value of your chosen option (e.g., 1600, 600, 200, or 0)."},
-                    {"role": "user", "content": full_prompt}
-                ],
-                temperature=self.temperature,
-                max_tokens=50  # Short response expected
-            )
-            
-            llm_response = response.choices[0].message.content
+            # GPT-5 only supports default temperature (1), so we remove the temperature parameter
+            try:
+                print(f"🔍 Making API call for {character}...")
+                print(f"Model: {self.model}")
+                print(f"Prompt length: {len(full_prompt)}")
+                
+                response = self.openai_client.responses.create(
+                    model=self.model,
+                    input=full_prompt,
+                    # max_completion_tokens=50  # Short response expected
+                )
+                
+                print(f"✅ API response received")
+                print(f"Response object: {response}")
+                print(f"Choices: {response.output_text}")
+                
+                llm_response = response.output_text
+                print(f"Raw response content: '{llm_response}'")
+                
+                if not llm_response:
+                    llm_response = "No response from LLM"
+                    print("⚠️ Empty response detected")
+                else:
+                    print(f"✅ Got response: '{llm_response}'")
+                    
+            except Exception as api_error:
+                llm_response = f"API Error: {str(api_error)}"
+                print(f"❌ API Error: {api_error}")
+                import traceback
+                traceback.print_exc()
             
             # Extract the option choice
             option_choice = self._extract_option_choice(llm_response)
@@ -429,7 +448,7 @@ def main():
                        help="Path to test probes CSV file")
     parser.add_argument("--output", type=str, default="llm_experiment_results.csv",
                        help="Path to save results")
-    parser.add_argument("--model", type=str, default="gpt-4",
+    parser.add_argument("--model", type=str, default="gpt-5",
                        help="OpenAI model to use")
     parser.add_argument("--temperature", type=float, default=0.7,
                        help="Temperature for model responses")
